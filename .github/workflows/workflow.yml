@@ -1,0 +1,49 @@
+name: Talousmedia Automaatio (Pörssin aukiolo & sulkeutuminen)
+
+on:
+  schedule:
+    # GitHub Actions käyttää UTC-aikaa.
+    # Suomen aika (EET) on UTC+2 (tai kesäaikana UTC+3).
+    # 07:00 UTC vastaa klo 09:00 Suomen talviaikaa (arkisin ma-pe)
+    - cron: '0 7 * * 1-5'
+    # 14:30 UTC vastaa klo 16:30 Suomen talviaikaa (arkisin ma-pe)
+    - cron: '30 14 * * 1-5'
+  workflow_dispatch: # Mahdollistaa työnkulun manuaalisen käynnistämisen GitHubin UI:sta
+
+jobs:
+  run-pipeline:
+    name: Hae, Analysoi ja Julkaise Pörssitiedotteet
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout-koodikanta
+        uses: actions/checkout@v4
+
+      - name: Asenna Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Asenna riippuvuudet
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Suorita uutisputki
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GHOST_API_URL: ${{ secrets.GHOST_API_URL }}
+          GHOST_ADMIN_API_KEY: ${{ secrets.GHOST_ADMIN_API_KEY }}
+          PUBLISH_WEBHOOK_URL: ${{ secrets.PUBLISH_WEBHOOK_URL }}
+          PUBLISH_STATUS: ${{ vars.PUBLISH_STATUS || 'draft' }}
+        run: |
+          python scheduler.py --run-once
+
+      - name: Tallenna ja päivitä tilatiedostot repositorioon
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add latest_releases.json processed_releases.json articles/ || true
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Automated news update: latest releases & articles [skip ci]" && git push)
